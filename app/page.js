@@ -1,103 +1,150 @@
-import Image from "next/image";
+"use client";
+
+import { useEffect, useState } from "react";
+import { Toaster, toast } from "react-hot-toast";
 
 export default function Home() {
-  return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm/6 text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-[family-name:var(--font-geist-mono)] font-semibold">
-              app/page.js
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+  const [sensorData, setSensorData] = useState({ temperature: 0, humidity: 0 });
+  const [controlData, setControlData] = useState({ relay: false, targetTemperature: 75 });
+  const [newTargetTemp, setNewTargetTemp] = useState(75);
+  const [loading, setLoading] = useState(false);
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+  // Fetch sensor & control data from ESP32 API
+  const fetchData = async () => {
+    try {
+      const [sensorRes, controlRes] = await Promise.all([
+        fetch("/api/sensor"),
+        fetch("/api/control"),
+      ]);
+
+      if (!sensorRes.ok || !controlRes.ok) {
+        throw new Error("ESP32 is offline");
+      }
+
+      const sensorJson = await sensorRes.json();
+      const controlJson = await controlRes.json();
+      setSensorData(sensorJson);
+      setControlData(controlJson);
+      setNewTargetTemp(controlJson.targetTemperature);
+    } catch (error) {
+      toast.error("ESP32 is offline. Check connection.");
+    }
+  };
+
+  // Toggle Relay ON/OFF
+  const toggleRelay = async () => {
+    setLoading(true);
+    const updatedRelay = !controlData.relay;
+
+    try {
+      const res = await fetch("/api/control", {
+        method: "POST",
+        body: JSON.stringify({ relay: updatedRelay }),
+        headers: { "Content-Type": "application/json" },
+      });
+
+      if (res.ok) {
+        setControlData((prev) => ({ ...prev, relay: updatedRelay }));
+        toast.success(`Relay ${updatedRelay ? "ON" : "OFF"}`);
+      } else {
+        throw new Error("Failed to update relay");
+      }
+    } catch (error) {
+      toast.error("ESP32 did not respond. Try again.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Update Target Temperature
+  const confirmTargetTemperature = async () => {
+    setLoading(true);
+
+    try {
+      const res = await fetch("/api/control", {
+        method: "POST",
+        body: JSON.stringify({ targetTemperature: newTargetTemp }),
+        headers: { "Content-Type": "application/json" },
+      });
+
+      if (res.ok) {
+        setControlData((prev) => ({ ...prev, targetTemperature: newTargetTemp }));
+        toast.success(`Target Temperature set to ${newTargetTemp}°C`);
+      } else {
+        throw new Error("Failed to update temperature");
+      }
+    } catch (error) {
+      toast.error("ESP32 did not respond. Try again.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Auto turn off relay if temp exceeds threshold
+  useEffect(() => {
+    if (sensorData.temperature > controlData.targetTemperature) {
+      setControlData((prev) => ({ ...prev, relay: false }));
+    }
+  }, [sensorData]);
+
+  useEffect(() => {
+    fetchData();
+    const interval = setInterval(fetchData, 2000);
+    return () => clearInterval(interval);
+  }, []);
+
+  return (
+    <div className="flex flex-col items-center justify-center min-h-screen bg-gray-900 text-white p-4">
+      <Toaster position="top-right" reverseOrder={false} />
+      <div className="bg-gray-800 p-6 rounded-xl shadow-xl w-full max-w-lg">
+        <h1 className="text-3xl font-bold text-center mb-4">🔥 Heater Controller</h1>
+
+        {/* Temperature & Humidity Display */}
+        <div className="grid grid-cols-2 gap-4 bg-gray-700 p-4 rounded-lg mb-4">
+          <div className="text-center">
+            <p className="text-lg">Temperature</p>
+            <h2 className="text-4xl font-bold">{sensorData.temperature}°C</h2>
+          </div>
+          <div className="text-center">
+            <p className="text-lg">Humidity</p>
+            <h2 className="text-4xl font-bold">{sensorData.humidity}%</h2>
+          </div>
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
+
+        {/* Relay Control */}
+        <button
+          onClick={toggleRelay}
+          disabled={loading}
+          className={`w-full py-3 rounded-lg text-lg font-semibold transition ${
+            controlData.relay ? "bg-red-600 hover:bg-red-700" : "bg-green-600 hover:bg-green-700"
+          } ${loading && "opacity-50 cursor-not-allowed"}`}
         >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
+          {loading ? "Updating..." : controlData.relay ? "Turn OFF" : "Turn ON"}
+        </button>
+
+        {/* Target Temperature Slider */}
+        <div className="mt-6">
+          <label className="block text-lg mb-2">Set Temperature Threshold</label>
+          <input
+            type="range"
+            min="25"
+            max="75"
+            value={newTargetTemp}
+            onChange={(e) => setNewTargetTemp(Number(e.target.value))}
+            className="w-full cursor-pointer"
           />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
+          <p className="text-center text-xl mt-2">{newTargetTemp}°C</p>
+
+          {/* Set Temperature Button */}
+          <button
+            onClick={confirmTargetTemperature}
+            disabled={loading}
+            className="w-full mt-4 py-3 bg-blue-600 hover:bg-blue-700 rounded-lg text-lg font-semibold transition disabled:opacity-50"
+          >
+            {loading ? "Setting..." : "Set Temperature"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
