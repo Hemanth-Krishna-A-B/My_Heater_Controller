@@ -23,9 +23,17 @@ export default function Home() {
 
       const sensorJson = await sensorRes.json();
       const controlJson = await controlRes.json();
+
       setSensorData(sensorJson);
-      setControlData(controlJson);
-      setNewTargetTemp(controlJson.targetTemperature);
+
+      // ✅ Update controlData only if values changed
+      if (
+        controlJson.relay !== controlData.relay ||
+        controlJson.targetTemperature !== controlData.targetTemperature
+      ) {
+        setControlData(controlJson);
+        setNewTargetTemp(controlJson.targetTemperature);
+      }
     } catch (error) {
       toast.error("ESP32 is offline. Check connection.");
     }
@@ -58,6 +66,8 @@ export default function Home() {
 
   // Update Target Temperature
   const confirmTargetTemperature = async () => {
+    if (newTargetTemp === controlData.targetTemperature) return; // ✅ Prevent duplicate requests
+
     setLoading(true);
 
     try {
@@ -80,16 +90,9 @@ export default function Home() {
     }
   };
 
-  // Auto turn off relay if temp exceeds threshold
-  useEffect(() => {
-    if (sensorData.temperature > controlData.targetTemperature) {
-      setControlData((prev) => ({ ...prev, relay: false }));
-    }
-  }, [sensorData]);
-
   useEffect(() => {
     fetchData();
-    const interval = setInterval(fetchData, 2000);
+    const interval = setInterval(fetchData, 5000); // ✅ Fetch every 5s to reduce load
     return () => clearInterval(interval);
   }, []);
 
